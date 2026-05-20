@@ -99,7 +99,7 @@ struct ubcore_token_id {
 ```c
 struct ubcore_jfs_wr {
     enum ubcore_opcode opcode;  // WRITE/READ/SEND
-    struct ubcore_tjetty *tjetty;
+    /* jetty / target jetty fields depend on the target ubcore headers */
     struct ubcore_rw_wr rw;     // READ/WRITE 操作
 };
 
@@ -192,6 +192,95 @@ wr.rw.dst.num_sge = 1;
 ubcore_post_jetty_send_wr(jetty, &wr, &bad_wr);
 ubcore_poll_jfc(jfc, cr_cnt, &cr);
 ```
+
+## NVMe-oF Target 调用接口
+
+本模块导出一个异步接口，供修改后的 NVMe-oF target 在解析自定义命令后调用：
+
+```c
+#include <linux/urma_blkdev.h>
+
+int urma_blkdev_submit_nvmet_io(struct block_device *bdev,
+                                const struct urma_blkdev_peer *peer,
+                                const struct urma_blkdev_io *io,
+                                urma_blkdev_done_fn done,
+                                void *priv);
+```
+
+`bdev` 建议传 `nvmet` namespace 对应的 `struct block_device *`。当前模块只有一个全局设备，`bdev == NULL` 时也会尝试使用全局设备，但正式集成时不要依赖这个调试路径。
+
+NVMe-oF target 侧示例：
+
+```c
+static void nvmet_urma_done(void *priv, int status)
+{
+    struct nvmet_req *req = priv;
+
+    nvmet_req_complete(req, status ? NVME_SC_INTERNAL : NVME_SC_SUCCESS);
+}
+
+ret = urma_blkdev_submit_nvmet_io(req->ns->bdev, &peer, &io,
+                                  nvmet_urma_done, req);
+if (ret)
+    nvmet_req_complete(req, NVME_SC_INTERNAL);
+```
+
+方向语义：
+
+| NVMe 命令 | 本模块方向 | URMA 操作 |
+|-----------|------------|-----------|
+| host read | `URMA_BLKDEV_IO_READ` | WRITE: ramdisk -> HBM |
+| host write | `URMA_BLKDEV_IO_WRITE` | READ: HBM -> ramdisk |
+
+## 队列管理
+
+`urma_blkdev_submit_nvmet_io()` 返回 `0` 只表示请求已经进入本模块队列，不表示 IO 完成。真正完成必须等待 `done(priv, status)` 回调。
+
+模块内部维护：
+
+- `pending_list`：已接受但尚未 post 到 jetty 的请求
+- `inflight_reqs`：已经分配 `wr_id` 并 post/等待完成的请求
+- `submit_work`：从 pending 队列取请求并尝试 post URMA WR
+- `queue_depth`：限制 pending + inflight 数量，避免调试时无限堆积请求
+
+模块参数：
+
+```bash
+sudo insmod urma_blkdev.ko device_size_mb=1024 ub_dev_name=ub0 queue_depth=1024
+```
+
+查看队列状态：
+
+```bash
+cat /sys/block/urma_blkdev/direct_io_queue
+```
+
+示例输出：
+
+```text
+queue_depth=1024
+pending=0
+inflight=0
+stopping=0
+next_wr_id=0
+```
+
+## 当前 fail-safe 行为
+
+当前代码已经实现了 NVMe-oF 可调用接口、请求入队、`wr_id` 分配、inflight 跟踪、异常回调和卸载清理。
+
+真实 `ubcore_post_jetty_send_wr()` 的 WR 字段还需要根据目标环境的 URMA 内核头文件确认。因此当前 `urma_blkdev_post_jetty_wr()` 会安全返回 `-EOPNOTSUPP`，并打印完整调试信息：
+
+- `wr_id`
+- 方向
+- `lba`
+- `block_count`
+- 本地 `local_ubva`
+- HBM 地址
+- HBM token
+- peer jetty 指针
+
+这样可以先联调 NVMe-oF 到本模块的调用链、参数传递和 completion 回调，不会因为猜测 ubcore WR 结构体字段导致内核崩溃。确认目标环境 jetty WR API 后，只需要替换 `urma_blkdev_post_jetty_wr()`。
 
 ## 卸载模块
 
