@@ -204,6 +204,10 @@ int ramdisk_ctrl_server_start(struct ramdisk_ctrl_server *server,
 
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
+    if (strlen(server->socket_path) >= sizeof(addr.sun_path)) {
+        return -errno;
+    }
+
     snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", server->socket_path);
 
     unlink(server->socket_path);

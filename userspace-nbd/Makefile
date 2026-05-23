@@ -1,13 +1,13 @@
 CC ?= cc
-CFLAGS ?= -O2 -g -Wall -Wextra -Werror -pthread
+CFLAGS ?= -O2 -g -Wall -Wextra -pthread
 CPPFLAGS ?= -Iinclude
 LDFLAGS ?= -pthread
-URMA_ROOT ?= ../external/umdk/src/urma
-URMA_LIBDIR ?= $(URMA_ROOT)/build/lib
+URMA_LIBDIR ?= /usr/lib64
 URMA_LIBS ?= -lurma
+HAVE_URMA ?= 1
 
 ifeq ($(HAVE_URMA),1)
-CPPFLAGS += -DHAVE_URMA=1 -I$(URMA_ROOT)/lib/urma/core/include
+CPPFLAGS += -DHAVE_URMA=1 -I /usr/include/umdk
 LDFLAGS += -L$(URMA_LIBDIR) $(URMA_LIBS)
 endif
 

@@ -40,7 +40,7 @@ struct daemon_ctx {
     uint32_t block_size;
     bool enable_urma;
     bool use_mock_urma;
-    const char *urma_dev;
+    const char *urma_eid;
     uint32_t eid_index;
     uint32_t urma_trans_mode;
     uint32_t urma_tp_type;
@@ -269,8 +269,9 @@ static void usage(const char *prog)
             "  --control-sock PATH         default /run/nbd-ramdisk/control.sock\n"
             "  --enable-urma               enable URMA special path\n"
             "  --real-urma                 use real URMA provider skeleton instead of mock\n"
-            "  --urma-dev NAME             URMA device name for --real-urma\n"
-            "  --eid-index N               URMA EID index, default first available\n"
+            "  --urma-eid EID_HEX          local 16-byte URMA EID for --real-urma\n"
+            "                              format: 32 hex digits, ':'/'-' allowed\n"
+            "  --eid-index N               optional EID index validation\n"
             "  --urma-trans-mode rm|rc|um  transport mode, default rc\n"
             "  --urma-tp-type rtp|ctp|utp  TP type, default rtp\n"
             "  --urma-token N              token value, default 0xACFE\n"
@@ -309,7 +310,7 @@ static int parse_args(int argc, char **argv, struct daemon_ctx *ctx)
         {"control-sock", required_argument, NULL, 'c'},
         {"enable-urma", no_argument, NULL, 'u'},
         {"real-urma", no_argument, NULL, 'r'},
-        {"urma-dev", required_argument, NULL, 1000},
+        {"urma-eid", required_argument, NULL, 1000},
         {"eid-index", required_argument, NULL, 1001},
         {"urma-trans-mode", required_argument, NULL, 1002},
         {"urma-tp-type", required_argument, NULL, 1003},
@@ -323,7 +324,7 @@ static int parse_args(int argc, char **argv, struct daemon_ctx *ctx)
     ctx->block_size = 4096;
     ctx->control_sock = "/run/nbd-ramdisk/control.sock";
     ctx->queue_depth = 32;
-    ctx->use_mock_urma = true;
+    ctx->use_mock_urma = false;
     ctx->eid_index = UINT32_MAX;
     ctx->urma_trans_mode = 1;
     ctx->urma_tp_type = 0;
@@ -356,7 +357,7 @@ static int parse_args(int argc, char **argv, struct daemon_ctx *ctx)
             ctx->queue_depth = (uint32_t)strtoul(optarg, NULL, 10);
             break;
         case 1000:
-            ctx->urma_dev = optarg;
+            ctx->urma_eid = optarg;
             break;
         case 1001:
             ctx->eid_index = (uint32_t)strtoul(optarg, NULL, 0);
@@ -466,7 +467,7 @@ int main(int argc, char **argv)
     urma_cfg.enable = ctx.enable_urma;
     urma_cfg.use_mock = ctx.use_mock_urma;
     urma_cfg.queue_depth = ctx.queue_depth;
-    urma_cfg.urma_dev = ctx.urma_dev;
+    urma_cfg.urma_dev = ctx.urma_eid;
     urma_cfg.eid_index = ctx.eid_index;
     urma_cfg.trans_mode = ctx.urma_trans_mode;
     urma_cfg.tp_type = ctx.urma_tp_type;

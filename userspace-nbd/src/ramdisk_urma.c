@@ -1,5 +1,6 @@
 #include "ramdisk_urma.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -15,6 +16,56 @@
 #define RAMDISK_URMA_POLL_SLEEP_US 1000U
 
 #ifdef HAVE_URMA
+static int hex_value(int c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
+
+static int parse_eid_text(const char *text, urma_eid_t *eid)
+{
+    uint8_t raw[16];
+    uint32_t nibbles = 0;
+    int high = -1;
+
+    if (text == NULL || eid == NULL)
+        return -EINVAL;
+
+    memset(raw, 0, sizeof(raw));
+    for (; *text != '\0'; text++) {
+        int v;
+
+        if (*text == ':' || *text == '-' || isspace((unsigned char)*text))
+            continue;
+
+        v = hex_value((unsigned char)*text);
+        if (v < 0)
+            return -EINVAL;
+        if (nibbles >= 32U)
+            return -EINVAL;
+
+        if (high < 0) {
+            high = v;
+        } else {
+            raw[nibbles / 2U] = (uint8_t)((high << 4) | v);
+            high = -1;
+        }
+        nibbles++;
+    }
+
+    if (nibbles != 32U || high >= 0)
+        return -EINVAL;
+
+    memset(eid, 0, sizeof(*eid));
+    memcpy(eid->raw, raw, sizeof(raw));
+    return 0;
+}
+
 static urma_transport_mode_t real_trans_mode(uint32_t mode)
 {
     switch (mode) {
@@ -28,20 +79,21 @@ static urma_transport_mode_t real_trans_mode(uint32_t mode)
     }
 }
 
-static urma_tp_type_t real_tp_type(uint32_t type)
-{
-    switch (type) {
-    case 1:
-        return URMA_CTP;
-    case 2:
-        return URMA_UTP;
-    case 0:
-    default:
-        return URMA_RTP;
-    }
-}
+// static urma_tp_type_t real_tp_type(uint32_t type)
+// {
+//     switch (type) {
+//     case 1:
+//         return URMA_CTP;
+//     case 2:
+//         return URMA_UTP;
+//     case 0:
+//     default:
+//         return URMA_RTP;
+//     }
+// }
 
-static int real_select_eid_index(urma_device_t *dev, uint32_t requested)
+static int real_select_eid_index(urma_device_t *dev, uint32_t requested,
+                                 const urma_eid_t *local_eid)
 {
     urma_eid_info_t *eid_list;
     uint32_t eid_cnt = 0;
@@ -55,10 +107,20 @@ static int real_select_eid_index(urma_device_t *dev, uint32_t requested)
     for (i = 0; i < eid_cnt; i++) {
         RD_LOG_INFO("URMA device=%s eid_index=%u", dev->name,
                     eid_list[i].eid_index);
-        if (eid_list[i].eid_index == requested)
+        if (local_eid != NULL &&
+            memcmp(eid_list[i].eid.raw, local_eid->raw,
+                   sizeof(local_eid->raw)) == 0) {
+            if (requested != UINT32_MAX && requested != eid_list[i].eid_index) {
+                urma_free_eid_list(eid_list);
+                return -EINVAL;
+            }
+            selected = (int)eid_list[i].eid_index;
+            break;
+        }
+        if (local_eid == NULL && eid_list[i].eid_index == requested)
             selected = (int)requested;
     }
-    if (selected < 0 && requested == UINT32_MAX)
+    if (selected < 0 && local_eid == NULL && requested == UINT32_MAX)
         selected = (int)eid_list[0].eid_index;
     urma_free_eid_list(eid_list);
     return selected < 0 ? -ENOENT : selected;
@@ -67,6 +129,7 @@ static int real_select_eid_index(urma_device_t *dev, uint32_t requested)
 static int real_init_provider(struct ramdisk_urma_mgr *mgr)
 {
     urma_init_attr_t init_attr = {0};
+    urma_eid_t local_eid;
     urma_device_t *dev;
     int eid_index;
     uint32_t depth;
@@ -78,35 +141,43 @@ static int real_init_provider(struct ramdisk_urma_mgr *mgr)
     }
 
     if (mgr->urma_dev[0] == '\0') {
-        RD_LOG_ERR("real URMA requires --urma-dev");
+        RD_LOG_ERR("real URMA requires --urma-eid EID_HEX");
         urma_uninit();
         return -EINVAL;
     }
 
-    dev = urma_get_device_by_name(mgr->urma_dev);
+    if (parse_eid_text(mgr->urma_dev, &local_eid) != 0) {
+        RD_LOG_ERR("invalid --urma-eid format: expected 16-byte hex EID, got '%s'",
+                   mgr->urma_dev);
+        urma_uninit();
+        return -EINVAL;
+    }
+
+    dev = urma_get_device_by_eid(local_eid, URMA_TRANSPORT_UB);
     if (dev == NULL) {
-        RD_LOG_ERR("urma_get_device_by_name failed dev=%s", mgr->urma_dev);
+        RD_LOG_ERR("urma_get_device_by_eid failed eid=%s", mgr->urma_dev);
         urma_uninit();
         return -ENODEV;
     }
     if (urma_query_device(dev, &mgr->dev_attr) != URMA_SUCCESS) {
-        RD_LOG_ERR("urma_query_device failed dev=%s", mgr->urma_dev);
+        RD_LOG_ERR("urma_query_device failed eid=%s dev=%s", mgr->urma_dev,
+                   dev->name);
         urma_uninit();
         return -EIO;
     }
 
-    eid_index = real_select_eid_index(dev, mgr->eid_index);
+    eid_index = real_select_eid_index(dev, mgr->eid_index, &local_eid);
     if (eid_index < 0) {
-        RD_LOG_ERR("no usable URMA EID dev=%s requested=%u rc=%d",
-                   mgr->urma_dev, mgr->eid_index, eid_index);
+        RD_LOG_ERR("no usable URMA EID dev=%s eid=%s requested=%u rc=%d",
+                   dev->name, mgr->urma_dev, mgr->eid_index, eid_index);
         urma_uninit();
         return eid_index;
     }
 
     mgr->urma_ctx = urma_create_context(dev, (uint32_t)eid_index);
     if (mgr->urma_ctx == NULL) {
-        RD_LOG_ERR("urma_create_context failed dev=%s eid_index=%d",
-                   mgr->urma_dev, eid_index);
+        RD_LOG_ERR("urma_create_context failed dev=%s eid=%s eid_index=%d",
+                   dev->name, mgr->urma_dev, eid_index);
         urma_uninit();
         return -EIO;
     }
@@ -166,7 +237,7 @@ static int real_init_provider(struct ramdisk_urma_mgr *mgr)
     };
     urma_jetty_cfg_t jetty_cfg = {
         .flag.bs.share_jfr = 1,
-        .jfs_cfg = jfs_cfg,
+        .jfs_cfg = &jfs_cfg,
         .shared.jfr = mgr->jfr,
     };
     mgr->jetty = urma_create_jetty(mgr->urma_ctx, &jetty_cfg);
@@ -178,14 +249,14 @@ static int real_init_provider(struct ramdisk_urma_mgr *mgr)
     urma_reg_seg_flag_t reg_flag = {
         .bs.token_policy = URMA_TOKEN_NONE,
         .bs.cacheable = URMA_NON_CACHEABLE,
-        .bs.access = URMA_ACCESS_READ | URMA_ACCESS_WRITE | URMA_ACCESS_ATOMIC,
+        .bs.access = URMA_ACCESS_REMOTE_READ | URMA_ACCESS_REMOTE_WRITE | URMA_ACCESS_REMOTE_ATOMIC,
         .bs.token_id_valid = 0,
     };
     urma_seg_cfg_t seg_cfg = {
         .va = (uint64_t)ramdisk_backend_base(mgr->backend),
         .len = ramdisk_backend_size(mgr->backend),
         .token_id = NULL,
-        .token_value = mgr->token,
+        .token_value = &(mgr->token),
         .flag = reg_flag,
         .user_ctx = 0,
         .iova = 0,
@@ -204,6 +275,7 @@ static int real_init_provider(struct ramdisk_urma_mgr *mgr)
                 (unsigned long long)mgr->local_tseg->seg.ubva.va,
                 (unsigned long long)mgr->local_tseg->seg.len,
                 mgr->jetty->jetty_id.id, mgr->urma_ctx->uasid);
+
     return 0;
 
 fail_jetty:
@@ -267,7 +339,7 @@ static int real_import_peer(struct ramdisk_urma_mgr *mgr,
 {
     urma_import_seg_flag_t seg_flag = {
         .bs.cacheable = URMA_NON_CACHEABLE,
-        .bs.access = URMA_ACCESS_READ | URMA_ACCESS_WRITE | URMA_ACCESS_ATOMIC,
+        .bs.access = URMA_ACCESS_REMOTE_READ | URMA_ACCESS_REMOTE_WRITE | URMA_ACCESS_REMOTE_ATOMIC,
         .bs.mapping = URMA_SEG_NOMAP,
     };
     urma_rjetty_t rjetty;
@@ -281,7 +353,7 @@ static int real_import_peer(struct ramdisk_urma_mgr *mgr,
     peer->remote_seg.ubva.va = peer->seg_va;
     peer->remote_seg.len = peer->seg_len;
     peer->remote_seg.attr.bs.cacheable = URMA_NON_CACHEABLE;
-    peer->remote_seg.attr.bs.access = URMA_ACCESS_READ | URMA_ACCESS_WRITE | URMA_ACCESS_ATOMIC;
+    peer->remote_seg.attr.bs.access = URMA_ACCESS_REMOTE_READ | URMA_ACCESS_REMOTE_WRITE | URMA_ACCESS_REMOTE_ATOMIC;
     peer->remote_seg.token_id = peer->seg_token_id;
 
     peer->import_tseg = urma_import_seg(mgr->urma_ctx, &peer->remote_seg,
@@ -300,7 +372,7 @@ static int real_import_peer(struct ramdisk_urma_mgr *mgr,
     rjetty.jetty_id.id = peer->jetty_id;
     rjetty.trans_mode = real_trans_mode(mgr->trans_mode);
     rjetty.type = URMA_JETTY;
-    rjetty.tp_type = real_tp_type(mgr->tp_type);
+    // rjetty.tp_type = real_tp_type(mgr->tp_type);
 
     peer->t_jetty = urma_import_jetty(mgr->urma_ctx, &rjetty, &mgr->token);
     if (peer->t_jetty == NULL) {
@@ -630,7 +702,7 @@ int ramdisk_urma_mgr_init(struct ramdisk_urma_mgr *mgr,
     mgr->enabled = config != NULL && config->enable;
     mgr->eid_index = config != NULL ? config->eid_index : UINT32_MAX;
     mgr->trans_mode = config != NULL ? config->trans_mode : 1U;
-    mgr->tp_type = config != NULL ? config->tp_type : 0U;
+    // mgr->tp_type = config != NULL ? config->tp_type : 0U;
     mgr->local_token_value =
         config != NULL && config->local_token_value != 0 ?
         config->local_token_value : RAMDISK_URMA_DEFAULT_TOKEN;
