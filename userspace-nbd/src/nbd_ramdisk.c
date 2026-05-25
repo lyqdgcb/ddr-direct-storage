@@ -326,8 +326,8 @@ static int parse_args(int argc, char **argv, struct daemon_ctx *ctx)
     ctx->queue_depth = 32;
     ctx->use_mock_urma = false;
     ctx->eid_index = UINT32_MAX;
-    ctx->urma_trans_mode = 1;
-    ctx->urma_tp_type = 0;
+    ctx->urma_trans_mode = 0;
+    ctx->urma_tp_type = 1;
     ctx->urma_token = 0xACFE;
     ctx->nbd_fd = -1;
     ctx->app_sock = -1;

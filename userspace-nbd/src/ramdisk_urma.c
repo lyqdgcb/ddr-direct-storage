@@ -79,18 +79,18 @@ static urma_transport_mode_t real_trans_mode(uint32_t mode)
     }
 }
 
-// static urma_tp_type_t real_tp_type(uint32_t type)
-// {
-//     switch (type) {
-//     case 1:
-//         return URMA_CTP;
-//     case 2:
-//         return URMA_UTP;
-//     case 0:
-//     default:
-//         return URMA_RTP;
-//     }
-// }
+static urma_tp_type_t real_tp_type(uint32_t type)
+{
+    switch (type) {
+    case 1:
+        return URMA_CTP;
+    case 2:
+        return URMA_UTP;
+    case 0:
+    default:
+        return URMA_RTP;
+    }
+}
 
 static int real_select_eid_index(urma_device_t *dev, uint32_t requested,
                                  const urma_eid_t *local_eid)
@@ -173,7 +173,8 @@ static int real_init_provider(struct ramdisk_urma_mgr *mgr)
         urma_uninit();
         return eid_index;
     }
-
+    RD_LOG_INFO("$$$$$ URMA EID dev=%s eid=%s requested=%u rc=%d",
+                   dev->name, mgr->urma_dev, mgr->eid_index, eid_index);
     mgr->urma_ctx = urma_create_context(dev, (uint32_t)eid_index);
     if (mgr->urma_ctx == NULL) {
         RD_LOG_ERR("urma_create_context failed dev=%s eid=%s eid_index=%d",
@@ -200,7 +201,7 @@ static int real_init_provider(struct ramdisk_urma_mgr *mgr)
         .depth = depth,
         .flag = {.value = 0},
         .jfce = mgr->jfce,
-        .user_ctx = 0,
+        .user_ctx = (uintptr_t)NULL,
     };
     mgr->jfc = urma_create_jfc(mgr->urma_ctx, &jfc_cfg);
     if (mgr->jfc == NULL) {
@@ -211,7 +212,7 @@ static int real_init_provider(struct ramdisk_urma_mgr *mgr)
     urma_jfr_cfg_t jfr_cfg = {
         .depth = depth,
         .flag.bs.tag_matching = URMA_NO_TAG_MATCHING,
-        .trans_mode = real_trans_mode(mgr->trans_mode),
+        .trans_mode = URMA_TM_RM,
         .min_rnr_timer = URMA_TYPICAL_MIN_RNR_TIMER,
         .jfc = mgr->jfc,
         .token_value = mgr->token,
@@ -226,18 +227,18 @@ static int real_init_provider(struct ramdisk_urma_mgr *mgr)
 
     urma_jfs_cfg_t jfs_cfg = {
         .depth = depth,
-        .trans_mode = real_trans_mode(mgr->trans_mode),
+        .trans_mode = URMA_TM_RM,
         .priority = URMA_MAX_PRIORITY,
         .max_sge = 1,
         .max_inline_data = 0,
         .rnr_retry = URMA_TYPICAL_RNR_RETRY,
         .err_timeout = URMA_TYPICAL_ERR_TIMEOUT,
         .jfc = mgr->jfc,
-        .user_ctx = 0,
+        .user_ctx = (uintptr_t)NULL,
     };
     urma_jetty_cfg_t jetty_cfg = {
         .flag.bs.share_jfr = 1,
-        .jfs_cfg = &jfs_cfg,
+        .jfs_cfg = jfs_cfg,
         .shared.jfr = mgr->jfr,
     };
     mgr->jetty = urma_create_jetty(mgr->urma_ctx, &jetty_cfg);
@@ -249,16 +250,20 @@ static int real_init_provider(struct ramdisk_urma_mgr *mgr)
     urma_reg_seg_flag_t reg_flag = {
         .bs.token_policy = URMA_TOKEN_NONE,
         .bs.cacheable = URMA_NON_CACHEABLE,
-        .bs.access = URMA_ACCESS_REMOTE_READ | URMA_ACCESS_REMOTE_WRITE | URMA_ACCESS_REMOTE_ATOMIC,
+        .bs.access = URMA_ACCESS_READ | URMA_ACCESS_WRITE | URMA_ACCESS_ATOMIC,
         .bs.token_id_valid = 0,
     };
+
+    // mgr->va = memalign((0x1 << 12), 0x2000);
+    // (void)memset(mgr->va, 1, 0x2000);
+    
     urma_seg_cfg_t seg_cfg = {
         .va = (uint64_t)ramdisk_backend_base(mgr->backend),
         .len = ramdisk_backend_size(mgr->backend),
         .token_id = NULL,
-        .token_value = &(mgr->token),
+        .token_value = mgr->token,
         .flag = reg_flag,
-        .user_ctx = 0,
+        .user_ctx = (uintptr_t)NULL,
         .iova = 0,
     };
     mgr->local_tseg = urma_register_seg(mgr->urma_ctx, &seg_cfg);
@@ -270,11 +275,17 @@ static int real_init_provider(struct ramdisk_urma_mgr *mgr)
     }
 
     mgr->real_initialized = true;
-    RD_LOG_INFO("real URMA initialized dev=%s eid_index=%d local_seg_va=%llu local_seg_len=%llu jetty_id=%u uasid=%u",
+    RD_LOG_INFO("real URMA initialized dev=%s eid_index=%d local_seg_va=%llu local_seg_len=%llu jetty_id=%u uasid=%u trans_mode=%u",
                 mgr->urma_dev, eid_index,
                 (unsigned long long)mgr->local_tseg->seg.ubva.va,
                 (unsigned long long)mgr->local_tseg->seg.len,
-                mgr->jetty->jetty_id.id, mgr->urma_ctx->uasid);
+                mgr->jetty->jetty_id.id, mgr->urma_ctx->uasid,URMA_TM_RM);
+
+    
+    RD_LOG_INFO("backend=%p reg_va=0x%llx tseg_va=0x%llx",
+        ramdisk_backend_base(mgr->backend),
+        (unsigned long long)seg_cfg.va,
+        (unsigned long long)mgr->local_tseg->seg.ubva.va);
 
     return 0;
 
@@ -339,10 +350,9 @@ static int real_import_peer(struct ramdisk_urma_mgr *mgr,
 {
     urma_import_seg_flag_t seg_flag = {
         .bs.cacheable = URMA_NON_CACHEABLE,
-        .bs.access = URMA_ACCESS_REMOTE_READ | URMA_ACCESS_REMOTE_WRITE | URMA_ACCESS_REMOTE_ATOMIC,
+        .bs.access = URMA_ACCESS_READ | URMA_ACCESS_WRITE | URMA_ACCESS_ATOMIC,
         .bs.mapping = URMA_SEG_NOMAP,
     };
-    urma_rjetty_t rjetty;
 
     if (!mgr->real_initialized)
         return -ENODEV;
@@ -353,7 +363,7 @@ static int real_import_peer(struct ramdisk_urma_mgr *mgr,
     peer->remote_seg.ubva.va = peer->seg_va;
     peer->remote_seg.len = peer->seg_len;
     peer->remote_seg.attr.bs.cacheable = URMA_NON_CACHEABLE;
-    peer->remote_seg.attr.bs.access = URMA_ACCESS_REMOTE_READ | URMA_ACCESS_REMOTE_WRITE | URMA_ACCESS_REMOTE_ATOMIC;
+    peer->remote_seg.attr.bs.access = URMA_ACCESS_READ | URMA_ACCESS_WRITE | URMA_ACCESS_ATOMIC;
     peer->remote_seg.token_id = peer->seg_token_id;
 
     peer->import_tseg = urma_import_seg(mgr->urma_ctx, &peer->remote_seg,
@@ -366,13 +376,16 @@ static int real_import_peer(struct ramdisk_urma_mgr *mgr,
         return -EIO;
     }
 
+    urma_rjetty_t rjetty;
     memset(&rjetty, 0, sizeof(rjetty));
     memcpy(rjetty.jetty_id.eid.raw, peer->eid, sizeof(peer->eid));
     rjetty.jetty_id.uasid = peer->uasid;
     rjetty.jetty_id.id = peer->jetty_id;
-    rjetty.trans_mode = real_trans_mode(mgr->trans_mode);
+    rjetty.trans_mode = URMA_TM_RM;
     rjetty.type = URMA_JETTY;
-    // rjetty.tp_type = real_tp_type(mgr->tp_type);
+    rjetty.tp_type = real_tp_type(mgr->tp_type);
+    rjetty.flag.bs.order_type = mgr->trans_mode == 3 ? 1 : 0;
+    rjetty.flag.bs.share_tp = mgr->trans_mode == 3 ? 1 : 0;
 
     peer->t_jetty = urma_import_jetty(mgr->urma_ctx, &rjetty, &mgr->token);
     if (peer->t_jetty == NULL) {
@@ -381,13 +394,13 @@ static int real_import_peer(struct ramdisk_urma_mgr *mgr,
         real_destroy_peer(peer);
         return -EIO;
     }
-    if (real_trans_mode(mgr->trans_mode) == URMA_TM_RC &&
-        urma_bind_jetty(mgr->jetty, peer->t_jetty) != URMA_SUCCESS) {
-        RD_LOG_ERR("urma_bind_jetty failed peer=%llu jetty=%u",
-                   (unsigned long long)peer->peer_id, peer->jetty_id);
-        real_destroy_peer(peer);
-        return -EIO;
-    }
+    // if (real_trans_mode(mgr->trans_mode) == URMA_TM_RC &&
+    //     urma_bind_jetty(mgr->jetty, peer->t_jetty) != URMA_SUCCESS) {
+    //     RD_LOG_ERR("urma_bind_jetty failed peer=%llu jetty=%u",
+    //                (unsigned long long)peer->peer_id, peer->jetty_id);
+    //     real_destroy_peer(peer);
+    //     return -EIO;
+    // }
     return 0;
 }
 
@@ -553,6 +566,11 @@ static int execute_real_xfer(struct ramdisk_urma_mgr *mgr,
 
     local_addr = (uint64_t)ramdisk_backend_base(mgr->backend) +
                  req->local_offset;
+    // local_addr = (uint64_t)mgr->va + req->local_offset;
+    // RD_LOG_INFO("$$$$$ local base addr=%llu local offset=%llu",
+    //             (uint64_t)mgr->va,
+    //             req->local_offset);
+    
     remote_addr = peer->remote_seg.ubva.va + remote_off;
 
     memset(&local_sge, 0, sizeof(local_sge));
@@ -587,7 +605,7 @@ static int execute_real_xfer(struct ramdisk_urma_mgr *mgr,
     wr.user_ctx = req->request_id;
     wr.rw = rw;
 
-    RD_LOG_INFO("posting real URMA request=%llu opcode=%u local_addr=%llu remote_addr=%llu len=%u",
+    RD_LOG_INFO("posting real URMA request=%llu opcode=%u local_addr=%llx remote_addr=%llx len=%u",
                 (unsigned long long)req->request_id, wr.opcode,
                 (unsigned long long)local_addr,
                 (unsigned long long)remote_addr, req->length);
@@ -702,7 +720,7 @@ int ramdisk_urma_mgr_init(struct ramdisk_urma_mgr *mgr,
     mgr->enabled = config != NULL && config->enable;
     mgr->eid_index = config != NULL ? config->eid_index : UINT32_MAX;
     mgr->trans_mode = config != NULL ? config->trans_mode : 1U;
-    // mgr->tp_type = config != NULL ? config->tp_type : 0U;
+    mgr->tp_type = config != NULL ? config->tp_type : 0U;
     mgr->local_token_value =
         config != NULL && config->local_token_value != 0 ?
         config->local_token_value : RAMDISK_URMA_DEFAULT_TOKEN;
@@ -799,7 +817,7 @@ int ramdisk_urma_disable(struct ramdisk_urma_mgr *mgr)
 }
 
 int ramdisk_urma_peer_connect(struct ramdisk_urma_mgr *mgr,
-                              const struct ramdisk_ctrl_peer_connect *info)
+                              const struct ramdisk_ctrl_peer_connect_info *info)
 {
     struct ramdisk_urma_peer *slot = NULL;
     struct ramdisk_urma_peer new_peer;

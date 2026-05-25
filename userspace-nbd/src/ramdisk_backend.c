@@ -4,6 +4,7 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
+#include <malloc.h>
 
 #include "ramdisk_log.h"
 
@@ -49,14 +50,16 @@ int ramdisk_backend_create(struct ramdisk_backend *backend, uint64_t size,
         return -rc;
     }
 
-    backend->base = calloc(1, (size_t)size);
+    backend->base = memalign(PAGE_SIZE, (size_t)size);
     if (backend->base == NULL) {
         pthread_mutex_destroy(&backend->lock);
         RD_LOG_ERR("backend allocation failed size=%llu",
                    (unsigned long long)size);
         return -ENOMEM;
     }
-
+    RD_LOG_INFO("before memset backend created base=%p size=%llu block_size=%u",
+                backend->base, (unsigned long long)size, block_size);
+    (void)memset(backend->base, 0, size);
     backend->size = size;
     backend->block_size = block_size;
     backend->initialized = true;

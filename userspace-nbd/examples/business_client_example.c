@@ -12,8 +12,8 @@
 #include "urma_api.h"
 #endif
 
-#define DEFAULT_CONTROL_SOCK "/run/nbd-ramdisk/control.sock"
-#define DEFAULT_URMA_DEV "ub0"
+#define DEFAULT_CONTROL_SOCK "/tmp/nbd-ramdisk-control.sock"
+#define DEFAULT_URMA_DEV "udma2"
 #define BUSINESS_MEM_SIZE (1024ULL * 1024ULL)
 #define DEFAULT_TRANSFER_LEN 4096U
 #define DEFAULT_QUEUE_DEPTH 64U
@@ -62,7 +62,7 @@ static int print_status(const char *sock, const char *tag)
 
 static urma_transport_mode_t business_trans_mode(void)
 {
-    return URMA_TM_RC;
+    return URMA_TM_RM;
 }
 
 static uint64_t request_id(uint32_t seq)
@@ -79,16 +79,7 @@ static int select_business_eid_index(urma_device_t *dev, uint32_t *eid_index)
     if (eid_list == NULL || eid_cnt == 0)
         return -ENODEV;
 
-    /*
-     * The ramdisk daemon defaults to the first available EID. Pick the second
-     * one for this business-side endpoint so its EID is not the ramdisk EID.
-     */
-    if (eid_cnt < 2U) {
-        urma_free_eid_list(eid_list);
-        return -EADDRINUSE;
-    }
-
-    *eid_index = eid_list[1].eid_index;
+    *eid_index = eid_list[0].eid_index;
     urma_free_eid_list(eid_list);
     return 0;
 }
@@ -155,7 +146,7 @@ static int create_business_urma(struct business_urma_ctx *ctx,
         .depth = depth,
         .flag = {.value = 0},
         .jfce = ctx->jfce,
-        .user_ctx = 0,
+        .user_ctx = (uintptr_t)NULL,
     };
     ctx->jfc = urma_create_jfc(ctx->ctx, &jfc_cfg);
     if (ctx->jfc == NULL) {
@@ -194,7 +185,7 @@ static int create_business_urma(struct business_urma_ctx *ctx,
     };
     urma_jetty_cfg_t jetty_cfg = {
         .flag.bs.share_jfr = 1,
-        .jfs_cfg = &jfs_cfg,
+        .jfs_cfg = jfs_cfg,
         .shared.jfr = ctx->jfr,
     };
     ctx->jetty = urma_create_jetty(ctx->ctx, &jetty_cfg);
@@ -216,16 +207,16 @@ static int create_business_urma(struct business_urma_ctx *ctx,
     urma_reg_seg_flag_t reg_flag = {
         .bs.token_policy = URMA_TOKEN_NONE,
         .bs.cacheable = URMA_NON_CACHEABLE,
-        .bs.access = URMA_ACCESS_REMOTE_READ | URMA_ACCESS_REMOTE_WRITE | URMA_ACCESS_REMOTE_ATOMIC,
+        .bs.access = URMA_ACCESS_READ | URMA_ACCESS_WRITE | URMA_ACCESS_ATOMIC,
         .bs.token_id_valid = 0,
     };
     urma_seg_cfg_t seg_cfg = {
         .va = (uint64_t)ctx->buf,
         .len = BUSINESS_MEM_SIZE,
         .token_id = NULL,
-        .token_value = &(ctx->token),
+        .token_value = ctx->token,
         .flag = reg_flag,
-        .user_ctx = 0,
+        .user_ctx = (uintptr_t)NULL,
         .iova = 0,
     };
     ctx->local_tseg = urma_register_seg(ctx->ctx, &seg_cfg);
@@ -279,7 +270,7 @@ static void destroy_business_urma(struct business_urma_ctx *ctx)
     urma_uninit();
 }
 
-static void fill_peer_from_urma(struct ramdisk_ctrl_peer_connect *peer,
+static void fill_peer_from_urma(struct ramdisk_ctrl_peer_connect_info *peer,
                                 const struct business_urma_ctx *ctx)
 {
     memset(peer, 0, sizeof(*peer));
@@ -302,7 +293,7 @@ int main(int argc, char **argv)
     const char *sock = DEFAULT_CONTROL_SOCK;
     const char *dev_name = getenv("RAMDISK_URMA_DEV");
     struct business_urma_ctx urma;
-    struct ramdisk_ctrl_peer_connect peer;
+    struct ramdisk_ctrl_peer_connect_info peer;
     struct ramdisk_ctrl_urma_transfer xfer;
     uint64_t remote_addr;
     char eid_text[33];
@@ -352,6 +343,9 @@ int main(int argc, char **argv)
     xfer.remote_hbm_addr = remote_addr;
     xfer.length = DEFAULT_TRANSFER_LEN;
     xfer.direction = RAMDISK_TO_HBM;
+
+    printf("remote_addr=%llx \n", remote_addr);
+
     rc = ramdisk_ctrl_urma_transfer(sock, &xfer);
     if (rc != 0) {
         fprintf(stderr, "RAMDISK_TO_HBM transfer failed rc=%d\n", rc);
