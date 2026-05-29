@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 
+
 #define RAMDISK_CTRL_MAGIC 0x52444354U
 #define RAMDISK_CTRL_VERSION 1U
 #define RAMDISK_CTRL_MAX_PAYLOAD 4096U
@@ -48,7 +49,7 @@ struct ramdisk_ctrl_status {
     uint64_t failed;
 };
 
-struct ramdisk_ctrl_peer_connect {
+struct ramdisk_ctrl_peer_connect_info {
     uint64_t peer_id;
     uint8_t eid[16];
     uint32_t uasid;

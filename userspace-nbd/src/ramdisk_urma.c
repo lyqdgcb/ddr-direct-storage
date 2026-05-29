@@ -404,6 +404,36 @@ static int real_import_peer(struct ramdisk_urma_mgr *mgr,
     return 0;
 }
 
+static void log_urma_cr(const char *tag, uint64_t want, const urma_cr_t *cr)
+{
+    RD_LOG_ERR("%s want=%llu status=%d user_ctx=%llu opcode=%u "
+               "flag=0x%x s_r=%u jetty=%u suspend_done=%u flush_err_done=%u "
+               "completion_len=%u local_id=%u "
+               "remote_eid=" EID_FMT " remote_uasid=%u remote_id=%u "
+               "imm_data=0x%llx invalid_token_id=%u invalid_token=0x%x "
+               "tpn=%u user_data=0x%llx",
+               tag,
+               (unsigned long long)want,
+               cr->status,
+               (unsigned long long)cr->user_ctx,
+               cr->opcode,
+               cr->flag.value,
+               cr->flag.bs.s_r,
+               cr->flag.bs.jetty,
+               cr->flag.bs.suspend_done,
+               cr->flag.bs.flush_err_done,
+               cr->completion_len,
+               cr->local_id,
+               EID_ARGS(cr->remote_id.eid),
+               cr->remote_id.uasid,
+               cr->remote_id.id,
+               (unsigned long long)cr->imm_data,
+               cr->invalid_token.token_id,
+               cr->invalid_token.token_value.token,
+               cr->tpn,
+               (unsigned long long)cr->user_data);
+}
+
 static int real_poll_completion(struct ramdisk_urma_mgr *mgr, uint64_t request_id)
 {
     uint32_t loops;
@@ -427,8 +457,9 @@ static int real_poll_completion(struct ramdisk_urma_mgr *mgr, uint64_t request_i
                         (unsigned long long)request_id, cr.status);
             continue;
         }
+        log_urma_cr("URMA completion failed", request_id, &cr);
         if (cr.status != URMA_CR_SUCCESS) {
-            RD_LOG_ERR("URMA completion failed request=%llu status=%d len=%u",
+            RD_LOG_ERR("URMA completion failed request=%llu status=%d len=%u ",
                        (unsigned long long)request_id, cr.status,
                        cr.completion_len);
             return -EIO;
@@ -659,6 +690,8 @@ static void *urma_worker_main(void *arg)
         xfer.length = req->length;
         xfer.direction = req->direction;
         rc = validate_xfer_locked(mgr, &xfer, &peer);
+        xfer.remote_hbm_addr = peer->seg_va;
+        req->remote_hbm_addr = peer->seg_va;
         pthread_mutex_unlock(&mgr->lock);
 
         if (rc == 0) {
@@ -888,7 +921,7 @@ int ramdisk_urma_peer_connect(struct ramdisk_urma_mgr *mgr,
     *slot = new_peer;
     pthread_mutex_unlock(&mgr->lock);
 
-    RD_LOG_INFO("URMA peer connected peer=%llu seg_va=%llu seg_len=%llu token=%u jetty=%u mock=%d",
+    RD_LOG_INFO("URMA peer connected peer=%llu seg_va=%llx seg_len=%llu token=%u jetty=%u mock=%d",
                 (unsigned long long)info->peer_id,
                 (unsigned long long)info->seg_va,
                 (unsigned long long)info->seg_len,

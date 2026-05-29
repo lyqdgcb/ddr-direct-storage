@@ -45,7 +45,7 @@ int main(void)
         .use_mock = true,
         .queue_depth = 8,
     };
-    struct ramdisk_ctrl_peer_connect peer;
+    struct ramdisk_ctrl_peer_connect_info peer;
     uint8_t pattern[4096];
     uint8_t out[4096];
     uint8_t hbm[4096];

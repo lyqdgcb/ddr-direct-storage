@@ -15,11 +15,16 @@ int ramdisk_ctrl_query_status(const char *sock_path,
 int ramdisk_ctrl_enable_urma(const char *sock_path);
 int ramdisk_ctrl_disable_urma(const char *sock_path);
 int ramdisk_ctrl_peer_connect(const char *sock_path,
-                              const struct ramdisk_ctrl_peer_connect *peer);
+                              const struct ramdisk_ctrl_peer_connect_info *peer);
 int ramdisk_ctrl_peer_disconnect(const char *sock_path, uint64_t peer_id);
 int ramdisk_ctrl_urma_transfer(const char *sock_path,
                                const struct ramdisk_ctrl_urma_transfer *xfer);
 
 int ramdisk_ctrl_parse_eid(const char *text, uint8_t eid[16]);
+int ramdisk_ctrl_parse_peer_connect(const char *sock_path, uint64_t peer_id,
+                                    const uint8_t *jetty_info,
+                                    uint32_t jetty_info_len,
+                                    const uint8_t *seg_info,
+                                    uint32_t seg_info_len);
 
 #endif

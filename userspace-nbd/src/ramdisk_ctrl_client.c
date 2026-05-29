@@ -7,6 +7,13 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include "urma_api.h"
+
+
+struct RsJettyKeyInfo {
+    urma_jetty_id_t jettyId;
+    urma_transport_mode_t transMode;
+};
 
 static ssize_t read_full(int fd, void *buf, size_t len)
 {
@@ -155,7 +162,7 @@ int ramdisk_ctrl_disable_urma(const char *sock_path)
 }
 
 int ramdisk_ctrl_peer_connect(const char *sock_path,
-                              const struct ramdisk_ctrl_peer_connect *peer)
+                              const struct ramdisk_ctrl_peer_connect_info *peer)
 {
     if (peer == NULL)
         return -EINVAL;
@@ -221,4 +228,35 @@ int ramdisk_ctrl_parse_eid(const char *text, uint8_t eid[16])
         }
     }
     return high == -1 && out == 16 ? 0 : -EINVAL;
+}
+
+int ramdisk_ctrl_parse_peer_connect(const char *sock_path, uint64_t peer_id,
+                                    const uint8_t *jetty_info,
+                                    uint32_t jetty_info_len,
+                                    const uint8_t *seg_info,
+                                    uint32_t seg_info_len)
+{
+    if (jetty_info == NULL || jetty_info_len == 0 ||
+        seg_info == NULL || seg_info_len == 0)
+        return -EINVAL;
+
+    struct ramdisk_ctrl_peer_connect_info peer = {0};
+
+    struct RsJettyKeyInfo *jettyKeyInfo = (struct RsJettyKeyInfo *)jetty_info;
+
+    urma_seg_t *out_key_urma = (urma_seg_t*)seg_info;
+
+    
+    peer.peer_id = peer_id;
+    memcpy(peer.eid, out_key_urma->ubva.eid.raw, sizeof(peer.eid));
+    // peer.uasid = urma_ctx->uasid;
+    peer.seg_va = out_key_urma->ubva.va;
+    peer.seg_len = out_key_urma->len;
+    peer.seg_token_id = out_key_urma->token_id;
+    peer.jetty_id = jettyKeyInfo->jettyId.id;
+
+    printf("$$$$ seg va is %llx\n", (unsigned long long)peer.seg_va);
+
+    return ramdisk_ctrl_transact(sock_path, RAMDISK_CTRL_PEER_CONNECT, &peer,
+                                 sizeof(peer), NULL, NULL, 1);
 }

@@ -6,6 +6,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define PAGE_SHIFT 12
+#define PAGE_SIZE (0x1 << PAGE_SHIFT) // 4KB
+
 struct ramdisk_backend {
     void *base;
     uint64_t size;

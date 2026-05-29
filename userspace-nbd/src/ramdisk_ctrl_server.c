@@ -93,11 +93,11 @@ static int handle_request(struct ramdisk_ctrl_server *server, int fd,
         rc = ramdisk_urma_disable(server->urma);
         return send_response(fd, hdr, rc, NULL, 0);
     case RAMDISK_CTRL_PEER_CONNECT:
-        if (hdr->payload_len != sizeof(struct ramdisk_ctrl_peer_connect)) {
+        if (hdr->payload_len != sizeof(struct ramdisk_ctrl_peer_connect_info)) {
             rc = -EINVAL;
         } else {
             rc = ramdisk_urma_peer_connect(server->urma,
-                    (const struct ramdisk_ctrl_peer_connect *)payload);
+                    (const struct ramdisk_ctrl_peer_connect_info *)payload);
         }
         return send_response(fd, hdr, rc, NULL, 0);
     case RAMDISK_CTRL_PEER_DISCONNECT:

@@ -12,6 +12,7 @@
 #define RAMDISK_NBD_CMD_FLUSH 3U
 #define RAMDISK_NBD_CMD_TRIM 4U
 
+
 struct ramdisk_nbd_request {
     uint32_t magic;
     uint32_t type;

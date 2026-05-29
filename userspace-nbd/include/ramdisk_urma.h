@@ -101,7 +101,7 @@ void ramdisk_urma_mgr_destroy(struct ramdisk_urma_mgr *mgr);
 int ramdisk_urma_enable(struct ramdisk_urma_mgr *mgr);
 int ramdisk_urma_disable(struct ramdisk_urma_mgr *mgr);
 int ramdisk_urma_peer_connect(struct ramdisk_urma_mgr *mgr,
-                              const struct ramdisk_ctrl_peer_connect *info);
+                              const struct ramdisk_ctrl_peer_connect_info *info);
 int ramdisk_urma_peer_disconnect(struct ramdisk_urma_mgr *mgr,
                                  uint64_t peer_id);
 int ramdisk_urma_transfer_sync(struct ramdisk_urma_mgr *mgr,

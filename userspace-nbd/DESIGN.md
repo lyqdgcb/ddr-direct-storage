@@ -384,7 +384,7 @@ enum ramdisk_ctrl_opcode {
 Peer connect command:
 
 ```c
-struct ramdisk_ctrl_peer_connect {
+struct ramdisk_ctrl_peer_connect_info {
     uint64_t peer_id;
     uint8_t eid[16];
     uint32_t uasid;

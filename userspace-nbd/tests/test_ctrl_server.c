@@ -106,7 +106,7 @@ int main(void)
     };
     struct ramdisk_ctrl_server_config scfg;
     struct ramdisk_ctrl_status st;
-    struct ramdisk_ctrl_peer_connect peer;
+    struct ramdisk_ctrl_peer_connect_info peer;
     uint32_t len;
     int rc;
 

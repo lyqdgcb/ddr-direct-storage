@@ -64,7 +64,7 @@ int main(int argc, char **argv)
         return rc == 0 ? 0 : 1;
     }
     if (strcmp(argv[arg], "peer-connect") == 0 && argc - arg == 8) {
-        struct ramdisk_ctrl_peer_connect peer;
+        struct ramdisk_ctrl_peer_connect_info peer;
         memset(&peer, 0, sizeof(peer));
         peer.peer_id = parse_u64(argv[arg + 1]);
         if (ramdisk_ctrl_parse_eid(argv[arg + 2], peer.eid) != 0) {
